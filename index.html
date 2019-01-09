@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+    <title>ZeroStockfishChess</title>
+    <meta charset="utf-8">
+    <meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+    <base href="" target="_top" id="base">
+    <script>base.href = document.location.href.replace("/media", "").replace("index.html", "").replace(/[&?]wrapper=False/, "").replace(/[&?]wrapper_nonce=[A-Za-z0-9]+/, "")</script>
+</head>
+<body>
+<link rel="stylesheet" type="text/css" href="css/chessboard-0.3.0.min.css">
+
+
+<a href="https://github.com/vtr0n/ZeroStockfishChess">GitHub</a>
+<center>
+    <input type="button" onclick="whiteOrientationBtn()" value="White"/>
+    <input type="button" onclick="blackOrientationBtn()" value="Black"/>
+    <div id="board" style="width: 500px"></div>
+
+    Difficult:<br>
+    <input type="button" id="diff1" onclick="diffChange(1)" value="1" style="color: #ff2c28;"/>
+    <input type="button" id="diff2" onclick="diffChange(2)" value="2"/>
+    <input type="button" id="diff3" onclick="diffChange(3)" value="3"/>
+    <input type="button" id="diff4" onclick="diffChange(4)" value="4"/>
+    <input type="button" id="diff5" onclick="diffChange(5)" value="5"/>
+    <input type="button" id="diff6" onclick="diffChange(6)" value="6"/>
+    <input type="button" id="diff7" onclick="diffChange(7)" value="7"/>
+</center>
+
+<script src="js/jquery.min.js"></script>
+<script src="js/chessboard-0.3.0.min.js"></script>
+<script src="js/chess.min.js"></script>
+<script type="text/javascript" src="js/ZeroFrame.js"></script>
+<script>
+
+    var board,
+        stockfish,
+        diff = 1,
+        game = new Chess();
+
+    /*
+     Buttons events
+     */
+    diffChange = function (num) {
+        document.getElementById("diff" + num).style.color = "red";
+        diff = getDiff(num);
+        let i;
+        for (i = 1; i <= 7; i++) {
+            if (i != num) {
+                document.getElementById("diff" + i).style.color = "black";
+            }
+        }
+
+    };
+
+    // get diff by fib
+    getDiff = function fibonacci(num) {
+        let a = 1, b = 0, temp;
+
+        while (num >= 0) {
+            temp = a;
+            a = a + b;
+            b = temp;
+            num--;
+        }
+
+        return b;
+    };
+
+    whiteOrientationBtn = function () {
+        board.orientation('white');
+        stockfish.stockfishSendMessage("position fen " + game.fen());
+        stockfish.stockfishSendMessage("go depth " + diff); // define diff
+    };
+
+    blackOrientationBtn = function () {
+        board.orientation('black');
+        stockfish.stockfishSendMessage("position fen " + game.fen());
+        stockfish.stockfishSendMessage("go depth " + diff); // define diff
+    };
+
+
+    // do not pick up pieces if the game is over
+    onDragStart = function (source, piece, position, orientation) {
+
+        if (game.in_checkmate() === true || game.in_draw() === true) {
+            alert("gave over");
+        }
+        if (game.in_checkmate() === true || game.in_draw() === true ||
+            piece.search(/^b/) !== -1) {
+        }
+    };
+
+    // event to stockfish
+    makeMove = function (bestMove) {
+        if (game.moves().length === 0) return;
+        game.move(bestMove, {sloppy: true});
+        board.position(game.fen());
+    };
+
+    onDrop = function (source, target) {
+        // see if the move is legal
+        var move = game.move({
+            from: source,
+            to: target,
+            promotion: 'q' // NOTE: always promote to a queen for example simplicity
+        });
+
+        // illegal move
+        if (move === null) return 'snapback';
+
+        // make random legal move for black
+        stockfish.stockfishSendMessage("position fen " + game.fen());
+        stockfish.stockfishSendMessage("go depth " + diff); // define diff
+    };
+
+    // update the board position after the piece snap
+    // for castling, en passant, pawn promotion
+    onSnapEnd = function () {
+        board.position(game.fen());
+    };
+
+    removeGreySquares = function () {
+        $('#board .square-55d63').css('background', '');
+    };
+
+    greySquare = function (square) {
+        let squareEl = $('#board .square-' + square);
+
+        let background = '#a9a9a9';
+        if (squareEl.hasClass('black-3c85d') === true) {
+            background = '#696969';
+        }
+
+        squareEl.css('background', background);
+    };
+
+    onMouseoverSquare = function (square, piece) {
+        // get list of possible moves for this square
+        let moves = game.moves({
+            square: square,
+            verbose: true
+        });
+
+        // exit if there are no moves available for this square
+        if (moves.length === 0) return;
+
+        // highlight the square they moused over
+        greySquare(square);
+
+        // highlight the possible squares for this piece
+        for (var i = 0; i < moves.length; i++) {
+            greySquare(moves[i].to);
+        }
+    };
+
+    onMouseoutSquare = function (square, piece) {
+        removeGreySquares();
+    };
+
+    // board config
+    cfg = {
+        draggable: true,
+        position: 'start',
+        onDragStart: onDragStart,
+        onDrop: onDrop,
+        onMouseoutSquare: onMouseoutSquare,
+        onMouseoverSquare: onMouseoverSquare,
+        onSnapEnd: onSnapEnd
+    };
+
+    board = ChessBoard('board', cfg);
+
+    // class to create stockfish worker
+    class ZeroStockfish extends ZeroFrame {
+
+        init() {
+            this.cmd("fileGet", {"inner_path": "js/stockfish.js", "required": false}, (data) => {
+
+                let blob = new Blob([data]);
+                let blobURL = window.URL.createObjectURL(blob);
+
+                this.stockfish = new Worker(blobURL);
+                this.stockfish.addEventListener('message', function (e) {
+                    console.log(e.data);
+                    if (e.data.includes("bestmove")) {
+                        makeMove(e.data)
+                    }
+                });
+            });
+        }
+
+        stockfishSendMessage(message) {
+            this.stockfish.postMessage(message);
+        }
+    }
+
+    stockfish = new ZeroStockfish();
+
+</script>
+
+</body>
+</html>
